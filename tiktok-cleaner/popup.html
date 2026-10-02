@@ -1,40 +1,63 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TikTok Cleaner</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 
 <body>
-  <main>
-    <h2>TikTok Cleaner</h2>
 
-    <p class="info">
-      Open your TikTok <b>Liked videos</b> page first.
-    </p>
+<div class="container">
 
-    <button id="start">Unlike Liked Videos</button>
-    <button id="stop" disabled>Stop</button>
+  <h1>TikTok Cleaner</h1>
 
-    <div class="status" id="status">
-      Ready
-    </div>
+  <p class="description">
+    Remove your TikTok likes, reposts and favorites.
+  </p>
 
-    <div class="counter" id="counter">
-      0 processed
-    </div>
+  <div class="warning">
+    ⚠️ These actions change your TikTok account.
+    Only start an operation you actually want.
+  </div>
 
-    <div class="bar">
-      <div id="bar"></div>
-    </div>
+  <button id="likes" class="action like">
+    ❤️ Remove All Likes
+  </button>
 
-    <p class="hint">
-      The extension clicks TikTok's own Like button.
-      It does not send private API requests.
-    </p>
-  </main>
+  <button id="reposts" class="action repost">
+    🔄 Remove All Reposts
+  </button>
 
-  <script src="popup.js"></script>
+  <button id="favorites" class="action favorite">
+    ⭐ Remove All Favorites
+  </button>
+
+  <button id="stop" class="stop" disabled>
+    ⛔ STOP
+  </button>
+
+  <div class="status">
+    <span id="status">Ready</span>
+  </div>
+
+  <div class="counter">
+    <span id="count">0</span>
+    processed
+  </div>
+
+  <div class="progress">
+    <div id="progress"></div>
+  </div>
+
+  <div id="details" class="details">
+    Waiting...
+  </div>
+
+</div>
+
+<script src="popup.js"></script>
+
 </body>
 </html>
