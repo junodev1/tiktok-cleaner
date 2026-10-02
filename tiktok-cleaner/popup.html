@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TikTok Cleaner</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+
+<body>
+
+  <div class="container">
+
+    <header>
+      <h1>TikTok Cleaner</h1>
+      <p>Clean your TikTok interactions</p>
+    </header>
+
+    <section class="warning">
+      <strong>⚠️ Be careful</strong>
+      <p>
+        These actions can permanently change your TikTok activity.
+        Only start an operation you really want to perform.
+      </p>
+    </section>
+
+    <section class="actions">
+
+      <button id="unlikeBtn" class="action-button">
+        ❤️ Unlike Liked Videos
+      </button>
+
+      <button id="repostBtn" class="action-button">
+        🔄 Remove Reposts
+      </button>
+
+      <button id="favoriteBtn" class="action-button">
+        ⭐ Unsave Favorites
+      </button>
+
+    </section>
+
+    <section class="progress-section">
+
+      <div class="progress-label">
+        <span id="status">Ready</span>
+        <span id="counter">0 / 0</span>
+      </div>
+
+      <div class="progress-bar">
+        <div id="progress"></div>
+      </div>
+
+    </section>
+
+    <button id="stopBtn" class="stop-button" disabled>
+      STOP
+    </button>
+
+    <footer>
+      <small>
+        The extension operates on your currently logged-in TikTok page.
+      </small>
+    </footer>
+
+  </div>
+
+  <script src="popup.js"></script>
+
+</body>
+</html>
