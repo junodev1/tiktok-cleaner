@@ -1,15 +1,18 @@
+"use strict";
+
 (() => {
-  "use strict";
 
   let running = false;
   let stopRequested = false;
 
   /*
-   * TikTok can rate-limit rapid interactions.
-   * Keep this deliberately slow.
+   * Deliberately slow.
+   *
+   * Do not reduce these to 0.
    */
   const ACTION_DELAY = 1800;
-  const NEXT_DELAY = 1500;
+  const PAGE_DELAY = 1500;
+  const SCROLL_DELAY = 1200;
 
   function sleep(ms) {
     return new Promise(resolve => {
@@ -18,14 +21,25 @@
   }
 
   function send(message) {
-    chrome.runtime.sendMessage(message);
+
+    try {
+      chrome.runtime.sendMessage(message);
+    } catch {
+      // Popup may have been closed.
+    }
   }
 
   function visible(element) {
-    if (!element) return false;
 
-    const rect = element.getBoundingClientRect();
-    const style = getComputedStyle(element);
+    if (!element) {
+      return false;
+    }
+
+    const rect =
+      element.getBoundingClientRect();
+
+    const style =
+      window.getComputedStyle(element);
 
     return (
       rect.width > 0 &&
@@ -35,203 +49,149 @@
     );
   }
 
-  /*
-   * TikTok has used these selectors for the web Like
-   * control. Keep several fallbacks because the DOM
-   * changes between layouts.
-   */
-  function findLikeControl() {
+  function textOf(element) {
 
-    const selectors = [
-      '[data-e2e="browse-like-icon"]',
-      '[data-e2e="like-icon"]',
-      'span[data-e2e="browse-like-icon"]',
-      'span[data-e2e="like-icon"]'
-    ];
-
-    for (const selector of selectors) {
-
-      const elements = [
-        ...document.querySelectorAll(selector)
-      ];
-
-      for (const element of elements) {
-
-        if (!visible(element)) {
-          continue;
-        }
-
-        /*
-         * The data-e2e element is sometimes a span
-         * inside the actual clickable button.
-         */
-        const button =
-          element.closest("button") ||
-          element.closest('[role="button"]') ||
-          element;
-
-        if (visible(button)) {
-          return button;
-        }
-      }
-    }
-
-    return null;
+    return (
+      element?.innerText ||
+      element?.textContent ||
+      ""
+    )
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
   /*
-   * Determine whether the current Like button is
-   * actually active.
-   *
-   * We NEVER click it unless we believe the video
-   * is already liked. This prevents accidentally
-   * adding likes.
+   * --------------------------------------------------
+   * GENERAL NAVIGATION
+   * --------------------------------------------------
    */
-  function isLiked(button) {
 
-    if (!button) {
-      return false;
-    }
+  function currentPath() {
+    return location.pathname.toLowerCase();
+  }
 
-    /*
-     * aria-pressed is the cleanest signal when available.
-     */
-    const pressed =
-      button.getAttribute("aria-pressed");
+  function isProfilePage() {
 
-    if (pressed === "true") {
-      return true;
-    }
+    const path = currentPath();
 
-    /*
-     * Look for TikTok's red heart SVG.
-     *
-     * TikTok's red brand color is approximately:
-     * rgb(254, 44, 85)
-     */
-    const redHeart =
-      button.querySelector(
-        'svg [fill="rgb(254, 44, 85)"],' +
-        'svg [fill="rgba(254, 44, 85, 1.0)"],' +
-        'svg path[fill*="254,44,85"],' +
-        'svg path[fill*="254, 44, 85"]'
-      );
+    return (
+      path.startsWith("/@") &&
+      !path.includes("/video/")
+    );
+  }
 
-    if (redHeart) {
-      return true;
-    }
+  function findProfileTabs() {
 
-    /*
-     * Some versions put the fill on the SVG itself.
-     */
-    const svgs = button.querySelectorAll("svg");
+    return [
+      ...document.querySelectorAll(
+        'a, button, [role="tab"], [role="button"]'
+      )
+    ].filter(visible);
+  }
 
-    for (const svg of svgs) {
+  function clickTabByWords(words) {
 
-      const fill =
-        (svg.getAttribute("fill") || "")
-          .replace(/\s/g, "")
-          .toLowerCase();
+    const elements =
+      findProfileTabs();
+
+    for (const element of elements) {
+
+      const text =
+        textOf(element);
+
+      const aria =
+        textOf({
+          innerText:
+            element.getAttribute(
+              "aria-label"
+            ) || ""
+        });
+
+      const combined =
+        `${text} ${aria}`;
 
       if (
-        fill.includes("254,44,85") ||
-        fill.includes("fe2c55")
+        words.some(word =>
+          combined.includes(word)
+        )
       ) {
+
+        element.click();
+
         return true;
       }
-    }
-
-    /*
-     * Accessibility fallback.
-     */
-    const label = (
-      button.getAttribute("aria-label") || ""
-    ).toLowerCase();
-
-    if (
-      label.includes("liked") &&
-      !label.includes("like this")
-    ) {
-      return true;
     }
 
     return false;
   }
 
-  async function unlikeCurrentVideo() {
+  /*
+   * --------------------------------------------------
+   * VIDEO CONTROLS
+   * --------------------------------------------------
+   */
 
-    const likeButton = findLikeControl();
-
-    if (!likeButton) {
-      return {
-        success: false,
-        reason: "Like button not found"
-      };
-    }
-
-    /*
-     * SAFETY CHECK:
-     *
-     * Never click an inactive heart.
-     */
-    if (!isLiked(likeButton)) {
-      return {
-        success: false,
-        reason: "Video does not appear to be liked"
-      };
-    }
-
-    likeButton.scrollIntoView({
-      behavior: "instant",
-      block: "center"
-    });
-
-    await sleep(300);
-
-    likeButton.click();
-
-    /*
-     * Wait for TikTok to process the action.
-     */
-    await sleep(ACTION_DELAY);
-
-    /*
-     * Verify the heart changed state.
-     */
-    const after =
-      findLikeControl();
-
-    if (after && !isLiked(after)) {
-      return {
-        success: true
-      };
-    }
-
-    return {
-      success: false,
-      reason: "TikTok did not confirm the unlike"
-    };
-  }
-
-  function findNextButton() {
-
-    const selectors = [
-      'button[data-e2e="arrow-right"]',
-      '[data-e2e="arrow-right"]',
-      'button[aria-label*="Next"]',
-      'button[aria-label*="next"]'
-    ];
+  function findElements(selectors) {
 
     for (const selector of selectors) {
 
+      const elements = [
+        ...document.querySelectorAll(selector)
+      ].filter(visible);
+
+      if (elements.length) {
+        return elements;
+      }
+    }
+
+    return [];
+  }
+
+  /*
+   * LIKE
+   */
+
+  function findLikeButton() {
+
+    const elements = findElements([
+      '[data-e2e="browse-like-icon"]',
+      '[data-e2e="like-icon"]'
+    ]);
+
+    for (const element of elements) {
+
       const button =
-        document.querySelector(selector);
+        element.closest("button") ||
+        element.closest('[role="button"]') ||
+        element;
+
+      if (visible(button)) {
+        return button;
+      }
+    }
+
+    /*
+     * Fallback for aria labels.
+     */
+    const buttons = [
+      ...document.querySelectorAll(
+        'button, [role="button"]'
+      )
+    ].filter(visible);
+
+    for (const button of buttons) {
+
+      const label = (
+        button.getAttribute(
+          "aria-label"
+        ) || ""
+      ).toLowerCase();
 
       if (
-        button &&
-        visible(button) &&
-        !button.disabled &&
-        button.getAttribute("aria-disabled") !== "true"
+        label === "like" ||
+        label === "liked" ||
+        label.includes("like")
       ) {
         return button;
       }
@@ -240,90 +200,151 @@
     return null;
   }
 
-  async function moveNext() {
+  function likeIsActive(button) {
 
-    const next = findNextButton();
-
-    if (!next) {
+    if (!button) {
       return false;
     }
 
-    next.click();
+    /*
+     * aria-pressed.
+     */
+    if (
+      button.getAttribute(
+        "aria-pressed"
+      ) === "true"
+    ) {
+      return true;
+    }
 
-    await sleep(NEXT_DELAY);
+    /*
+     * Look for the red TikTok heart.
+     */
+    const html =
+      button.innerHTML.toLowerCase();
 
-    return true;
+    if (
+      html.includes("#fe2c55") ||
+      html.includes("254,44,85") ||
+      html.includes("254, 44, 85")
+    ) {
+      return true;
+    }
+
+    const label = (
+      button.getAttribute(
+        "aria-label"
+      ) || ""
+    ).toLowerCase();
+
+    if (label === "liked") {
+      return true;
+    }
+
+    return false;
+  }
+
+  async function removeLike() {
+
+    const button =
+      findLikeButton();
+
+    if (!button) {
+
+      return {
+        ok: false,
+        reason: "Like button not found"
+      };
+    }
+
+    /*
+     * SAFETY:
+     * Don't click an inactive heart.
+     */
+    if (!likeIsActive(button)) {
+
+      return {
+        ok: false,
+        reason: "Video is not currently liked"
+      };
+    }
+
+    button.click();
+
+    await sleep(ACTION_DELAY);
+
+    const after =
+      findLikeButton();
+
+    if (
+      after &&
+      !likeIsActive(after)
+    ) {
+
+      return {
+        ok: true
+      };
+    }
+
+    return {
+      ok: false,
+      reason: "Unlike was not verified"
+    };
   }
 
   /*
-   * When the Likes page opens a video in a viewer,
-   * this function attempts to identify that viewer.
-   */
-  function isVideoViewerOpen() {
-
-    return Boolean(
-      document.querySelector(
-        '[data-e2e="browse-like-icon"],' +
-        '[data-e2e="like-icon"]'
-      )
-    );
-  }
-
-  /*
-   * Find a video from the user's liked-video grid.
+   * --------------------------------------------------
+   * REPOST
+   * --------------------------------------------------
    *
-   * Older/current TikTok layouts have used
-   * data-e2e="user-liked-item".
+   * Current community implementations use
+   * data-e2e="video-share-repost".
    */
-  function findLikedGridItem() {
 
-    const selectors = [
-      '[data-e2e="user-liked-item"]',
-      '[data-e2e="user-liked-item-list"] a',
-      '[data-e2e="user-liked-item"] a'
-    ];
+  function findRepostButton() {
 
-    for (const selector of selectors) {
+    const elements =
+      findElements([
+        '[data-e2e="video-share-repost"]',
+        '[data-e2e*="repost"]'
+      ]);
 
-      const item =
-        document.querySelector(selector);
+    for (const element of elements) {
 
-      if (item && visible(item)) {
-        return item;
+      const button =
+        element.closest("button") ||
+        element.closest('[role="button"]') ||
+        element;
+
+      if (visible(button)) {
+        return button;
       }
     }
 
     return null;
   }
 
-  async function openFirstLikedVideo() {
+  async function openShareMenu() {
 
-    const item =
-      findLikedGridItem();
+    const share =
+      findElements([
+        '[data-e2e="video-share"]',
+        '[data-e2e*="share"]'
+      ]);
 
-    if (!item) {
-      return false;
-    }
+    for (const element of share) {
 
-    const link =
-      item.matches("a")
-        ? item
-        : item.querySelector("a");
+      const button =
+        element.closest("button") ||
+        element.closest('[role="button"]') ||
+        element;
 
-    if (!link) {
-      return false;
-    }
+      if (visible(button)) {
 
-    link.click();
+        button.click();
 
-    /*
-     * Wait for viewer/player.
-     */
-    for (let i = 0; i < 20; i++) {
+        await sleep(600);
 
-      await sleep(500);
-
-      if (isVideoViewerOpen()) {
         return true;
       }
     }
@@ -331,7 +352,437 @@
     return false;
   }
 
-  async function run() {
+  async function removeRepost() {
+
+    /*
+     * First look for the direct repost control.
+     */
+    let button =
+      findRepostButton();
+
+    if (!button) {
+
+      const opened =
+        await openShareMenu();
+
+      if (!opened) {
+
+        return {
+          ok: false,
+          reason: "Share/Repost control not found"
+        };
+      }
+
+      button =
+        findRepostButton();
+    }
+
+    if (!button) {
+
+      /*
+       * Look for "Remove repost" in the menu.
+       */
+      const menuItems = [
+        ...document.querySelectorAll(
+          '[role="menuitem"], button, [role="button"]'
+        )
+      ].filter(visible);
+
+      for (const item of menuItems) {
+
+        const text =
+          textOf(item);
+
+        if (
+          text.includes("remove repost") ||
+          text.includes("undo repost") ||
+          text === "repost"
+        ) {
+
+          item.click();
+
+          await sleep(ACTION_DELAY);
+
+          return {
+            ok: true
+          };
+        }
+      }
+
+      return {
+        ok: false,
+        reason: "Remove Repost option not found"
+      };
+    }
+
+    /*
+     * Open the share menu if needed.
+     */
+    button.click();
+
+    await sleep(500);
+
+    const items = [
+      ...document.querySelectorAll(
+        '[role="menuitem"], button, [role="button"]'
+      )
+    ].filter(visible);
+
+    for (const item of items) {
+
+      const text =
+        textOf(item);
+
+      if (
+        text.includes("remove repost") ||
+        text.includes("undo repost")
+      ) {
+
+        item.click();
+
+        await sleep(ACTION_DELAY);
+
+        return {
+          ok: true
+        };
+      }
+    }
+
+    return {
+      ok: false,
+      reason: "Remove Repost option not found"
+    };
+  }
+
+  /*
+   * --------------------------------------------------
+   * FAVORITES
+   * --------------------------------------------------
+   */
+
+  function findFavoriteButton() {
+
+    const elements =
+      findElements([
+        '[data-e2e*="collect"]',
+        '[data-e2e*="favorite"]',
+        '[data-e2e*="favourite"]'
+      ]);
+
+    for (const element of elements) {
+
+      const button =
+        element.closest("button") ||
+        element.closest('[role="button"]') ||
+        element;
+
+      if (visible(button)) {
+        return button;
+      }
+    }
+
+    /*
+     * Accessibility fallback.
+     */
+    const buttons = [
+      ...document.querySelectorAll(
+        'button, [role="button"]'
+      )
+    ].filter(visible);
+
+    for (const button of buttons) {
+
+      const label = (
+        button.getAttribute(
+          "aria-label"
+        ) || ""
+      ).toLowerCase();
+
+      const title = (
+        button.getAttribute(
+          "title"
+        ) || ""
+      ).toLowerCase();
+
+      const combined =
+        `${label} ${title}`;
+
+      if (
+        combined.includes("favorite") ||
+        combined.includes("favourite") ||
+        combined.includes("save")
+      ) {
+
+        return button;
+      }
+    }
+
+    return null;
+  }
+
+  async function removeFavorite() {
+
+    let button =
+      findFavoriteButton();
+
+    /*
+     * If there is no direct save button, try Share.
+     */
+    if (!button) {
+
+      const opened =
+        await openShareMenu();
+
+      if (opened) {
+        button =
+          findFavoriteButton();
+      }
+    }
+
+    if (!button) {
+
+      /*
+       * Search menu text.
+       */
+      const items = [
+        ...document.querySelectorAll(
+          '[role="menuitem"], button, [role="button"]'
+        )
+      ].filter(visible);
+
+      for (const item of items) {
+
+        const text =
+          textOf(item);
+
+        if (
+          text.includes(
+            "remove from favorites"
+          ) ||
+          text.includes(
+            "remove from favourite"
+          ) ||
+          text.includes(
+            "unsave"
+          )
+        ) {
+
+          item.click();
+
+          await sleep(ACTION_DELAY);
+
+          return {
+            ok: true
+          };
+        }
+      }
+
+      return {
+        ok: false,
+        reason: "Favorite control not found"
+      };
+    }
+
+    button.click();
+
+    await sleep(ACTION_DELAY);
+
+    return {
+      ok: true
+    };
+  }
+
+  /*
+   * --------------------------------------------------
+   * NEXT VIDEO
+   * --------------------------------------------------
+   */
+
+  function findNextButton() {
+
+    const selectors = [
+      '[data-e2e="arrow-right"]',
+      'button[aria-label="Next"]',
+      'button[aria-label="next"]',
+      '[data-e2e*="arrow-right"]'
+    ];
+
+    for (const selector of selectors) {
+
+      const element =
+        document.querySelector(selector);
+
+      if (
+        element &&
+        visible(element) &&
+        element.getAttribute(
+          "aria-disabled"
+        ) !== "true"
+      ) {
+
+        return element;
+      }
+    }
+
+    /*
+     * Text fallback.
+     */
+    const buttons = [
+      ...document.querySelectorAll(
+        'button, [role="button"]'
+      )
+    ].filter(visible);
+
+    for (const button of buttons) {
+
+      const label = (
+        button.getAttribute(
+          "aria-label"
+        ) || ""
+      ).toLowerCase();
+
+      if (
+        label === "next" ||
+        label.includes("next video")
+      ) {
+
+        return button;
+      }
+    }
+
+    return null;
+  }
+
+  async function nextVideo() {
+
+    const button =
+      findNextButton();
+
+    if (!button) {
+      return false;
+    }
+
+    button.click();
+
+    await sleep(NEXT_DELAY);
+
+    return true;
+  }
+
+  /*
+   * --------------------------------------------------
+   * PROFILE GRID
+   * --------------------------------------------------
+   */
+
+  function findVideoTiles(type) {
+
+    let selectors = [];
+
+    if (type === "likes") {
+
+      selectors = [
+        '[data-e2e="user-liked-item"]',
+        '[data-e2e*="liked-item"]'
+      ];
+
+    } else if (type === "reposts") {
+
+      selectors = [
+        '[data-e2e="user-post-item"]',
+        '[data-e2e*="repost"]'
+      ];
+
+    } else if (type === "favorites") {
+
+      selectors = [
+        '[data-e2e*="favorite"]',
+        '[data-e2e*="collect"]'
+      ];
+    }
+
+    for (const selector of selectors) {
+
+      const elements = [
+        ...document.querySelectorAll(selector)
+      ].filter(visible);
+
+      if (elements.length) {
+        return elements;
+      }
+    }
+
+    /*
+     * Generic video links fallback.
+     */
+    return [
+      ...document.querySelectorAll(
+        'a[href*="/video/"]'
+      )
+    ].filter(visible);
+  }
+
+  async function openFirstTile(type) {
+
+    const tiles =
+      findVideoTiles(type);
+
+    if (!tiles.length) {
+      return false;
+    }
+
+    const tile =
+      tiles[0];
+
+    const link =
+      tile.matches("a")
+        ? tile
+        : tile.querySelector(
+            'a[href*="/video/"]'
+          );
+
+    if (!link) {
+      return false;
+    }
+
+    link.click();
+
+    await sleep(2000);
+
+    return Boolean(
+      findLikeButton() ||
+      findRepostButton() ||
+      findFavoriteButton()
+    );
+  }
+
+  /*
+   * --------------------------------------------------
+   * MAIN CLEANUP
+   * --------------------------------------------------
+   */
+
+  async function processCurrent(type) {
+
+    if (type === "likes") {
+      return removeLike();
+    }
+
+    if (type === "reposts") {
+      return removeRepost();
+    }
+
+    if (type === "favorites") {
+      return removeFavorite();
+    }
+
+    return {
+      ok: false,
+      reason: "Unknown operation"
+    };
+  }
+
+  async function run(type) {
 
     if (running) {
       return;
@@ -347,27 +798,39 @@
 
       send({
         type: "STATUS",
-        text: "Checking TikTok page..."
+        text: "Preparing..."
       });
 
       /*
-       * If the viewer isn't already open, try to open
-       * the first liked video.
+       * The user can either:
+       *
+       * A) already have a video open
+       * B) be on the appropriate profile tab
+       *
+       * Try to detect an existing video first.
        */
-      if (!isVideoViewerOpen()) {
+
+      const videoAlreadyOpen =
+        Boolean(
+          findLikeButton() ||
+          findRepostButton() ||
+          findFavoriteButton()
+        );
+
+      if (!videoAlreadyOpen) {
 
         send({
           type: "STATUS",
-          text: "Opening a liked video..."
+          text: "Finding videos..."
         });
 
         const opened =
-          await openFirstLikedVideo();
+          await openFirstTile(type);
 
         if (!opened) {
+
           throw new Error(
-            "Couldn't open a liked video. " +
-            "Open Profile → Liked videos and try again."
+            "No videos found. Open the corresponding TikTok tab first."
           );
         }
       }
@@ -378,54 +841,59 @@
 
         send({
           type: "STATUS",
-          text: `Checking video ${attempts}...`
+          text:
+            `${type}: processing video ${attempts}`,
+          detail:
+            "Checking the current action before clicking."
         });
 
         const result =
-          await unlikeCurrentVideo();
+          await processCurrent(type);
 
-        if (result.success) {
+        if (result.ok) {
 
           done++;
 
           send({
             type: "PROGRESS",
             done,
-            total: attempts
+            total: attempts,
+            detail:
+              "Action completed successfully."
           });
 
         } else {
 
           send({
             type: "STATUS",
-            text: result.reason
+            text:
+              result.reason,
+            detail:
+              "Skipped — no destructive click was made."
           });
-
-          /*
-           * Don't count a video as successfully
-           * unliked unless verification succeeded.
-           */
         }
 
         if (stopRequested) {
           break;
         }
 
-        /*
-         * Move to the next liked video.
-         */
         const moved =
-          await moveNext();
+          await nextVideo();
 
         if (!moved) {
 
           send({
             type: "STATUS",
-            text: "No next video button found."
+            text:
+              "No next-video control found.",
+            detail:
+              "TikTok may have changed its player layout."
           });
 
           break;
         }
+
+        await sleep(PAGE_DELAY);
       }
 
       if (stopRequested) {
@@ -446,7 +914,7 @@
     } catch (error) {
 
       console.error(
-        "TikTok Cleaner:",
+        "TikTok Cleaner error:",
         error
       );
 
@@ -454,7 +922,7 @@
         type: "ERROR",
         text:
           error?.message ||
-          "Unexpected error."
+          "Cleanup failed."
       });
 
     } finally {
@@ -464,6 +932,12 @@
     }
   }
 
+  /*
+   * --------------------------------------------------
+   * MESSAGE HANDLER
+   * --------------------------------------------------
+   */
+
   chrome.runtime.onMessage.addListener(
     (message, sender, sendResponse) => {
 
@@ -471,9 +945,9 @@
         return;
       }
 
-      if (message.command === "START_UNLIKE") {
+      if (message.command === "START") {
 
-        run();
+        run(message.type);
 
         sendResponse({
           ok: true
