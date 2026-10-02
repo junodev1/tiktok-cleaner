@@ -3,87 +3,112 @@
 }
 
 body {
-  width: 340px;
   margin: 0;
-  background: #111;
+  width: 350px;
+  background: #101010;
   color: white;
   font-family: Arial, sans-serif;
 }
 
-main {
+.container {
   padding: 18px;
 }
 
-h2 {
-  margin: 0 0 12px;
+h1 {
   text-align: center;
+  margin: 0 0 6px;
+  font-size: 21px;
 }
 
-.info {
-  background: #222;
+.description {
+  text-align: center;
+  color: #999;
+  font-size: 12px;
+  margin: 0 0 15px;
+}
+
+.warning {
+  background: #2a2110;
+  border: 1px solid #6c551d;
+  color: #e8d69c;
   padding: 10px;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 11px;
   line-height: 1.4;
+  margin-bottom: 14px;
 }
 
-button {
+.action,
+.stop {
   width: 100%;
   border: 0;
   border-radius: 8px;
   padding: 12px;
-  margin-top: 9px;
-  cursor: pointer;
+  margin-top: 8px;
+  color: white;
+  font-size: 13px;
   font-weight: bold;
+  cursor: pointer;
 }
 
-#start {
-  background: #fe2c55;
-  color: white;
+.action {
+  background: #242424;
+  text-align: left;
 }
 
-#stop {
+.action:hover {
   background: #333;
-  color: white;
 }
 
-button:disabled {
-  opacity: .4;
+.action:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+
+.stop {
+  background: #fe2c55;
+}
+
+.stop:disabled {
+  background: #3b2027;
+  color: #777;
   cursor: not-allowed;
 }
 
 .status {
-  margin-top: 18px;
   text-align: center;
-  color: #ccc;
+  margin-top: 18px;
   min-height: 20px;
+  color: #ddd;
+  font-size: 12px;
 }
 
 .counter {
   text-align: center;
-  margin-top: 7px;
-  color: #aaa;
+  color: #999;
+  margin-top: 6px;
+  font-size: 12px;
 }
 
-.bar {
+.progress {
   height: 7px;
-  background: #333;
+  background: #292929;
   border-radius: 10px;
-  margin-top: 12px;
   overflow: hidden;
+  margin-top: 10px;
 }
 
-#bar {
-  width: 0%;
+#progress {
   height: 100%;
+  width: 0%;
   background: #fe2c55;
   transition: width .2s;
 }
 
-.hint {
-  color: #777;
-  font-size: 11px;
-  line-height: 1.4;
+.details {
   text-align: center;
-  margin-top: 15px;
+  color: #666;
+  font-size: 10px;
+  margin-top: 10px;
+  min-height: 15px;
 }
