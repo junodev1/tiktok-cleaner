@@ -1,71 +1,40 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html>
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TikTok Cleaner</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 
 <body>
+  <main>
+    <h2>TikTok Cleaner</h2>
 
-  <div class="container">
+    <p class="info">
+      Open your TikTok <b>Liked videos</b> page first.
+    </p>
 
-    <header>
-      <h1>TikTok Cleaner</h1>
-      <p>Clean your TikTok interactions</p>
-    </header>
+    <button id="start">Unlike Liked Videos</button>
+    <button id="stop" disabled>Stop</button>
 
-    <section class="warning">
-      <strong>⚠️ Be careful</strong>
-      <p>
-        These actions can permanently change your TikTok activity.
-        Only start an operation you really want to perform.
-      </p>
-    </section>
+    <div class="status" id="status">
+      Ready
+    </div>
 
-    <section class="actions">
+    <div class="counter" id="counter">
+      0 processed
+    </div>
 
-      <button id="unlikeBtn" class="action-button">
-        ❤️ Unlike Liked Videos
-      </button>
+    <div class="bar">
+      <div id="bar"></div>
+    </div>
 
-      <button id="repostBtn" class="action-button">
-        🔄 Remove Reposts
-      </button>
-
-      <button id="favoriteBtn" class="action-button">
-        ⭐ Unsave Favorites
-      </button>
-
-    </section>
-
-    <section class="progress-section">
-
-      <div class="progress-label">
-        <span id="status">Ready</span>
-        <span id="counter">0 / 0</span>
-      </div>
-
-      <div class="progress-bar">
-        <div id="progress"></div>
-      </div>
-
-    </section>
-
-    <button id="stopBtn" class="stop-button" disabled>
-      STOP
-    </button>
-
-    <footer>
-      <small>
-        The extension operates on your currently logged-in TikTok page.
-      </small>
-    </footer>
-
-  </div>
+    <p class="hint">
+      The extension clicks TikTok's own Like button.
+      It does not send private API requests.
+    </p>
+  </main>
 
   <script src="popup.js"></script>
-
 </body>
 </html>
