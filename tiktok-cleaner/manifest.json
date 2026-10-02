@@ -1,9 +1,11 @@
 {
   "manifest_version": 3,
   "name": "TikTok Cleaner",
-  "version": "2.0.0",
-  "description": "Bulk unlike TikTok liked videos using the normal TikTok interface.",
-  "permissions": ["tabs"],
+  "version": "3.0.0",
+  "description": "Remove your TikTok likes, reposts and favorites using the TikTok website.",
+  "permissions": [
+    "tabs"
+  ],
   "host_permissions": [
     "https://www.tiktok.com/*"
   ],
@@ -13,8 +15,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.tiktok.com/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://www.tiktok.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ]
