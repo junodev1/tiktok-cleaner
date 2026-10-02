@@ -1,23 +1,31 @@
-const startButton = document.getElementById("start");
+"use strict";
+
+const likesButton = document.getElementById("likes");
+const repostsButton = document.getElementById("reposts");
+const favoritesButton = document.getElementById("favorites");
 const stopButton = document.getElementById("stop");
+
 const statusElement = document.getElementById("status");
-const counterElement = document.getElementById("counter");
-const barElement = document.getElementById("bar");
+const countElement = document.getElementById("count");
+const progressElement = document.getElementById("progress");
+const detailsElement = document.getElementById("details");
 
 let running = false;
 
-function status(text) {
-  statusElement.textContent = text;
+function setStatus(value) {
+  statusElement.textContent = value;
 }
 
-function setRunning(value) {
-  running = value;
+function setButtons(disabled) {
+  likesButton.disabled = disabled;
+  repostsButton.disabled = disabled;
+  favoritesButton.disabled = disabled;
 
-  startButton.disabled = value;
-  stopButton.disabled = !value;
+  stopButton.disabled = !disabled;
 }
 
-async function getTab() {
+async function getTikTokTab() {
+
   const tabs = await chrome.tabs.query({
     active: true,
     currentWindow: true
@@ -25,7 +33,11 @@ async function getTab() {
 
   const tab = tabs[0];
 
-  if (!tab?.url?.startsWith("https://www.tiktok.com/")) {
+  if (!tab || !tab.url) {
+    throw new Error("No active tab.");
+  }
+
+  if (!tab.url.startsWith("https://www.tiktok.com/")) {
     throw new Error(
       "Open TikTok in the current tab first."
     );
@@ -34,106 +46,186 @@ async function getTab() {
   return tab;
 }
 
-startButton.addEventListener("click", async () => {
-  if (running) return;
+async function start(type) {
+
+  if (running) {
+    return;
+  }
+
+  let tab;
 
   try {
-    const tab = await getTab();
-
-    const confirmed = confirm(
-      "This will remove your likes from videos using TikTok's Like button.\n\n" +
-      "Start?"
-    );
-
-    if (!confirmed) return;
-
-    setRunning(true);
-
-    status("Starting...");
-    counterElement.textContent = "0 processed";
-    barElement.style.width = "0%";
-
-    chrome.tabs.sendMessage(
-      tab.id,
-      {
-        command: "START_UNLIKE"
-      },
-      response => {
-        if (chrome.runtime.lastError) {
-          status(
-            "Refresh TikTok, open Likes, then try again."
-          );
-
-          setRunning(false);
-        }
-      }
-    );
-
+    tab = await getTikTokTab();
   } catch (error) {
-    status(error.message);
+    setStatus(error.message);
+    return;
   }
-});
 
-stopButton.addEventListener("click", async () => {
-  try {
-    const tab = await getTab();
+  const names = {
+    likes: "Remove All Likes",
+    reposts: "Remove All Reposts",
+    favorites: "Remove All Favorites"
+  };
 
-    chrome.tabs.sendMessage(
-      tab.id,
-      {
-        command: "STOP"
+  const confirmed = confirm(
+    `${names[type]}\n\n` +
+    "This will modify your TikTok account using " +
+    "the normal TikTok website controls.\n\n" +
+    "Continue?"
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  running = true;
+
+  setButtons(true);
+
+  setStatus("Starting...");
+  countElement.textContent = "0";
+  progressElement.style.width = "0%";
+  detailsElement.textContent = "";
+
+  chrome.tabs.sendMessage(
+    tab.id,
+    {
+      command: "START",
+      type
+    },
+    response => {
+
+      if (chrome.runtime.lastError) {
+
+        setStatus(
+          "Refresh TikTok and try again."
+        );
+
+        setButtons(false);
+        running = false;
       }
-    );
+    }
+  );
+}
 
-    status("Stopping...");
-  } catch {
-    status("Unable to stop.");
-  }
-});
+likesButton.addEventListener(
+  "click",
+  () => start("likes")
+);
 
-chrome.runtime.onMessage.addListener(message => {
-  if (!message) return;
+repostsButton.addEventListener(
+  "click",
+  () => start("reposts")
+);
 
-  if (message.type === "STATUS") {
-    status(message.text);
-  }
+favoritesButton.addEventListener(
+  "click",
+  () => start("favorites")
+);
 
-  if (message.type === "PROGRESS") {
-    counterElement.textContent =
-      `${message.done} processed`;
+stopButton.addEventListener(
+  "click",
+  async () => {
 
-    if (message.total > 0) {
-      barElement.style.width =
-        `${Math.min(
-          100,
-          (message.done / message.total) * 100
-        )}%`;
+    try {
+
+      const tab =
+        await getTikTokTab();
+
+      chrome.tabs.sendMessage(
+        tab.id,
+        {
+          command: "STOP"
+        }
+      );
+
+      setStatus("Stopping...");
+
+    } catch (error) {
+
+      setStatus(error.message);
     }
   }
+);
 
-  if (message.type === "FINISHED") {
-    status(
-      `Finished — ${message.done} videos unliked`
-    );
+chrome.runtime.onMessage.addListener(
+  message => {
 
-    counterElement.textContent =
-      `${message.done} processed`;
+    if (!message) {
+      return;
+    }
 
-    barElement.style.width = "100%";
+    if (message.type === "STATUS") {
 
-    setRunning(false);
+      setStatus(
+        message.text || "Working..."
+      );
+
+      if (message.detail) {
+        detailsElement.textContent =
+          message.detail;
+      }
+    }
+
+    if (message.type === "PROGRESS") {
+
+      countElement.textContent =
+        message.done || 0;
+
+      if (
+        message.total &&
+        message.total > 0
+      ) {
+
+        progressElement.style.width =
+          `${Math.min(
+            100,
+            (message.done / message.total) * 100
+          )}%`;
+      }
+
+      if (message.detail) {
+        detailsElement.textContent =
+          message.detail;
+      }
+    }
+
+    if (message.type === "FINISHED") {
+
+      setStatus(
+        `Finished — ${message.done} removed`
+      );
+
+      countElement.textContent =
+        message.done || 0;
+
+      progressElement.style.width = "100%";
+
+      setButtons(false);
+      running = false;
+    }
+
+    if (message.type === "STOPPED") {
+
+      setStatus(
+        `Stopped — ${message.done} removed`
+      );
+
+      countElement.textContent =
+        message.done || 0;
+
+      setButtons(false);
+      running = false;
+    }
+
+    if (message.type === "ERROR") {
+
+      setStatus(
+        message.text || "An error occurred."
+      );
+
+      setButtons(false);
+      running = false;
+    }
   }
-
-  if (message.type === "STOPPED") {
-    status(
-      `Stopped — ${message.done} videos processed`
-    );
-
-    setRunning(false);
-  }
-
-  if (message.type === "ERROR") {
-    status(`Error: ${message.text}`);
-    setRunning(false);
-  }
-});
+);
