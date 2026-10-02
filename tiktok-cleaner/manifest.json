@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "TikTok Cleaner",
+  "version": "1.0.0",
+  "description": "Manage TikTok likes, reposts and favorites from your browser.",
+  "permissions": [
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.tiktok.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "TikTok Cleaner"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.tiktok.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
