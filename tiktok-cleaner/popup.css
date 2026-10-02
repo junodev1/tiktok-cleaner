@@ -3,129 +3,87 @@
 }
 
 body {
+  width: 340px;
   margin: 0;
-  width: 350px;
   background: #111;
-  color: #fff;
-  font-family: Arial, Helvetica, sans-serif;
+  color: white;
+  font-family: Arial, sans-serif;
 }
 
-.container {
+main {
   padding: 18px;
 }
 
-header {
+h2 {
+  margin: 0 0 12px;
   text-align: center;
-  margin-bottom: 18px;
 }
 
-header h1 {
-  margin: 0;
-  font-size: 21px;
-}
-
-header p {
-  margin: 6px 0 0;
-  color: #aaa;
+.info {
+  background: #222;
+  padding: 10px;
+  border-radius: 8px;
   font-size: 13px;
-}
-
-.warning {
-  padding: 12px;
-  margin-bottom: 16px;
-  border-radius: 10px;
-  background: #2b2110;
-  border: 1px solid #76591c;
-  color: #e8d39a;
-  font-size: 12px;
-}
-
-.warning strong {
-  display: block;
-  margin-bottom: 5px;
-}
-
-.warning p {
-  margin: 0;
   line-height: 1.4;
 }
 
-.actions {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-
-.action-button {
+button {
   width: 100%;
-  padding: 12px;
   border: 0;
   border-radius: 8px;
-  background: #252525;
-  color: white;
+  padding: 12px;
+  margin-top: 9px;
   cursor: pointer;
-  font-size: 14px;
-  text-align: left;
-  transition: background 0.15s;
+  font-weight: bold;
 }
 
-.action-button:hover {
+#start {
+  background: #fe2c55;
+  color: white;
+}
+
+#stop {
   background: #333;
+  color: white;
 }
 
-.action-button:disabled {
-  opacity: 0.45;
+button:disabled {
+  opacity: .4;
   cursor: not-allowed;
 }
 
-.progress-section {
-  margin-top: 20px;
+.status {
+  margin-top: 18px;
+  text-align: center;
+  color: #ccc;
+  min-height: 20px;
 }
 
-.progress-label {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 7px;
-  color: #bbb;
-  font-size: 12px;
+.counter {
+  text-align: center;
+  margin-top: 7px;
+  color: #aaa;
 }
 
-.progress-bar {
-  width: 100%;
+.bar {
   height: 7px;
+  background: #333;
+  border-radius: 10px;
+  margin-top: 12px;
   overflow: hidden;
-  border-radius: 20px;
-  background: #292929;
 }
 
-#progress {
+#bar {
   width: 0%;
   height: 100%;
   background: #fe2c55;
-  transition: width 0.2s;
+  transition: width .2s;
 }
 
-.stop-button {
-  width: 100%;
-  margin-top: 14px;
-  padding: 11px;
-  border: 0;
-  border-radius: 8px;
-  background: #fe2c55;
-  color: white;
-  font-weight: bold;
-  cursor: pointer;
-}
-
-.stop-button:disabled {
-  background: #49202a;
-  color: #999;
-  cursor: not-allowed;
-}
-
-footer {
-  margin-top: 15px;
-  text-align: center;
-  color: #666;
+.hint {
+  color: #777;
+  font-size: 11px;
   line-height: 1.4;
+  text-align: center;
+  margin-top: 15px;
 }
