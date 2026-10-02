@@ -1,192 +1,170 @@
-"use strict";
-
 (() => {
+  "use strict";
+
+  // ============================================================
+  // CONFIGURATION
+  // ============================================================
+
+  const CONFIG = Object.freeze({
+    ACTION_DELAY: 1800,
+    NEXT_DELAY: 1800,
+    PAGE_DELAY: 1200,
+    MAX_CONSECUTIVE_FAILURES: 3
+  });
 
   let running = false;
   let stopRequested = false;
 
-  /*
-   * Deliberately slow.
-   *
-   * Do not reduce these to 0.
-   */
-  const ACTION_DELAY = 1800;
-  const PAGE_DELAY = 1500;
-  const SCROLL_DELAY = 1200;
+  // ============================================================
+  // UTILITIES
+  // ============================================================
 
-  function sleep(ms) {
-    return new Promise(resolve => {
-      setTimeout(resolve, ms);
+  const sleep = ms =>
+    new Promise(resolve => setTimeout(resolve, ms));
+
+  function send(message) {
+    try {
+      chrome.runtime.sendMessage(message);
+    } catch (_) {
+      // Popup may be closed. The cleanup itself can continue.
+    }
+  }
+
+  function report(text, detail = "") {
+    send({
+      type: "STATUS",
+      text,
+      detail
     });
   }
 
-  function send(message) {
-
-    try {
-      chrome.runtime.sendMessage(message);
-    } catch {
-      // Popup may have been closed.
-    }
+  function progress(done, attempts, detail = "") {
+    send({
+      type: "PROGRESS",
+      done,
+      total: attempts,
+      detail
+    });
   }
 
-  function visible(element) {
+  function isVisible(element) {
+    if (!element) return false;
 
-    if (!element) {
-      return false;
-    }
-
-    const rect =
-      element.getBoundingClientRect();
-
-    const style =
-      window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
 
     return (
       rect.width > 0 &&
       rect.height > 0 &&
       style.display !== "none" &&
-      style.visibility !== "hidden"
+      style.visibility !== "hidden" &&
+      style.opacity !== "0"
     );
   }
 
-  function textOf(element) {
-
-    return (
-      element?.innerText ||
-      element?.textContent ||
-      ""
-    )
+  function normalize(value) {
+    return String(value || "")
       .toLowerCase()
       .replace(/\s+/g, " ")
       .trim();
   }
 
-  /*
-   * --------------------------------------------------
-   * GENERAL NAVIGATION
-   * --------------------------------------------------
-   */
+  function elementText(element) {
+    if (!element) return "";
 
-  function currentPath() {
-    return location.pathname.toLowerCase();
-  }
-
-  function isProfilePage() {
-
-    const path = currentPath();
-
-    return (
-      path.startsWith("/@") &&
-      !path.includes("/video/")
+    return normalize(
+      [
+        element.innerText,
+        element.textContent,
+        element.getAttribute("aria-label"),
+        element.getAttribute("title"),
+        element.getAttribute("data-e2e"),
+        element.getAttribute("data-testid")
+      ]
+        .filter(Boolean)
+        .join(" ")
     );
   }
 
-  function findProfileTabs() {
-
-    return [
-      ...document.querySelectorAll(
-        'a, button, [role="tab"], [role="button"]'
-      )
-    ].filter(visible);
-  }
-
-  function clickTabByWords(words) {
-
-    const elements =
-      findProfileTabs();
-
-    for (const element of elements) {
-
-      const text =
-        textOf(element);
-
-      const aria =
-        textOf({
-          innerText:
-            element.getAttribute(
-              "aria-label"
-            ) || ""
-        });
-
-      const combined =
-        `${text} ${aria}`;
-
-      if (
-        words.some(word =>
-          combined.includes(word)
-        )
-      ) {
-
-        element.click();
-
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  /*
-   * --------------------------------------------------
-   * VIDEO CONTROLS
-   * --------------------------------------------------
-   */
-
-  function findElements(selectors) {
+  function visibleElements(selectors) {
+    const result = [];
 
     for (const selector of selectors) {
-
-      const elements = [
-        ...document.querySelectorAll(selector)
-      ].filter(visible);
-
-      if (elements.length) {
-        return elements;
+      for (const element of document.querySelectorAll(selector)) {
+        if (isVisible(element)) {
+          result.push(element);
+        }
       }
     }
 
-    return [];
+    return [...new Set(result)];
   }
 
-  /*
-   * LIKE
-   */
+  function clickable(element) {
+    if (!element) return null;
+
+    return (
+      element.closest("button") ||
+      element.closest('[role="button"]') ||
+      element.closest("a") ||
+      element
+    );
+  }
+
+  function safeClick(element) {
+    const target = clickable(element);
+
+    if (!target || !isVisible(target)) {
+      return false;
+    }
+
+    target.scrollIntoView({
+      behavior: "instant",
+      block: "center"
+    });
+
+    target.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        view: window
+      })
+    );
+
+    return true;
+  }
+
+  // ============================================================
+  // LIKE
+  // ============================================================
 
   function findLikeButton() {
-
-    const elements = findElements([
+    const selectors = [
       '[data-e2e="browse-like-icon"]',
-      '[data-e2e="like-icon"]'
-    ]);
+      '[data-e2e="like-icon"]',
+      '[data-testid*="like"]'
+    ];
 
-    for (const element of elements) {
+    const candidates = visibleElements(selectors);
 
-      const button =
-        element.closest("button") ||
-        element.closest('[role="button"]') ||
-        element;
+    for (const candidate of candidates) {
+      const button = clickable(candidate);
 
-      if (visible(button)) {
+      if (button && isVisible(button)) {
         return button;
       }
     }
 
-    /*
-     * Fallback for aria labels.
-     */
-    const buttons = [
-      ...document.querySelectorAll(
-        'button, [role="button"]'
-      )
-    ].filter(visible);
+    // Accessibility fallback.
+    const buttons = visibleElements([
+      "button",
+      '[role="button"]'
+    ]);
 
     for (const button of buttons) {
-
-      const label = (
-        button.getAttribute(
-          "aria-label"
-        ) || ""
-      ).toLowerCase();
+      const label = normalize(
+        button.getAttribute("aria-label")
+      );
 
       if (
         label === "like" ||
@@ -200,87 +178,100 @@
     return null;
   }
 
-  function likeIsActive(button) {
+  function likeState(button) {
+    if (!button) return "unknown";
 
-    if (!button) {
-      return false;
+    const ariaPressed =
+      button.getAttribute("aria-pressed");
+
+    if (ariaPressed === "true") {
+      return "liked";
     }
 
-    /*
-     * aria-pressed.
-     */
+    if (ariaPressed === "false") {
+      return "not-liked";
+    }
+
+    const label = normalize(
+      button.getAttribute("aria-label")
+    );
+
+    if (label === "liked") {
+      return "liked";
+    }
+
     if (
-      button.getAttribute(
-        "aria-pressed"
-      ) === "true"
+      label === "like" ||
+      label.includes("like this video")
     ) {
-      return true;
+      return "not-liked";
     }
 
     /*
-     * Look for the red TikTok heart.
+     * TikTok has used the red #FE2C55 color for the
+     * active heart. Treat this only as a fallback.
      */
-    const html =
-      button.innerHTML.toLowerCase();
+    const html = button.innerHTML
+      .replace(/\s/g, "")
+      .toLowerCase();
 
     if (
       html.includes("#fe2c55") ||
-      html.includes("254,44,85") ||
-      html.includes("254, 44, 85")
+      html.includes("254,44,85")
     ) {
-      return true;
+      return "liked";
     }
 
-    const label = (
-      button.getAttribute(
-        "aria-label"
-      ) || ""
-    ).toLowerCase();
-
-    if (label === "liked") {
-      return true;
-    }
-
-    return false;
+    return "unknown";
   }
 
   async function removeLike() {
-
-    const button =
-      findLikeButton();
+    const button = findLikeButton();
 
     if (!button) {
-
       return {
         ok: false,
         reason: "Like button not found"
       };
     }
 
-    /*
-     * SAFETY:
-     * Don't click an inactive heart.
-     */
-    if (!likeIsActive(button)) {
+    const before = likeState(button);
 
+    if (before === "not-liked") {
       return {
         ok: false,
-        reason: "Video is not currently liked"
+        skipped: true,
+        reason: "Video is already unliked"
       };
     }
 
-    button.click();
+    /*
+     * Safety feature:
+     *
+     * If we cannot determine whether the video is liked,
+     * DO NOT click it.
+     */
+    if (before !== "liked") {
+      return {
+        ok: false,
+        skipped: true,
+        reason: "Could not verify that the video is liked"
+      };
+    }
 
-    await sleep(ACTION_DELAY);
+    if (!safeClick(button)) {
+      return {
+        ok: false,
+        reason: "Could not click Like button"
+      };
+    }
 
-    const after =
-      findLikeButton();
+    await sleep(CONFIG.ACTION_DELAY);
 
-    if (
-      after &&
-      !likeIsActive(after)
-    ) {
+    const afterButton = findLikeButton();
+    const after = likeState(afterButton);
 
+    if (after === "not-liked") {
       return {
         ok: true
       };
@@ -288,35 +279,25 @@
 
     return {
       ok: false,
-      reason: "Unlike was not verified"
+      reason: "Unlike could not be verified"
     };
   }
 
-  /*
-   * --------------------------------------------------
-   * REPOST
-   * --------------------------------------------------
-   *
-   * Current community implementations use
-   * data-e2e="video-share-repost".
-   */
+  // ============================================================
+  // REPOST
+  // ============================================================
 
   function findRepostButton() {
+    const candidates = visibleElements([
+      '[data-e2e="video-share-repost"]',
+      '[data-e2e*="repost"]',
+      '[data-testid*="repost"]'
+    ]);
 
-    const elements =
-      findElements([
-        '[data-e2e="video-share-repost"]',
-        '[data-e2e*="repost"]'
-      ]);
+    for (const candidate of candidates) {
+      const button = clickable(candidate);
 
-    for (const element of elements) {
-
-      const button =
-        element.closest("button") ||
-        element.closest('[role="button"]') ||
-        element;
-
-      if (visible(button)) {
+      if (button && isVisible(button)) {
         return button;
       }
     }
@@ -324,159 +305,122 @@
     return null;
   }
 
-  async function openShareMenu() {
+  function findShareButton() {
+    const candidates = visibleElements([
+      '[data-e2e="video-share"]',
+      '[data-e2e*="share"]',
+      '[data-testid*="share"]'
+    ]);
 
-    const share =
-      findElements([
-        '[data-e2e="video-share"]',
-        '[data-e2e*="share"]'
-      ]);
+    for (const candidate of candidates) {
+      const button = clickable(candidate);
 
-    for (const element of share) {
-
-      const button =
-        element.closest("button") ||
-        element.closest('[role="button"]') ||
-        element;
-
-      if (visible(button)) {
-
-        button.click();
-
-        await sleep(600);
-
-        return true;
+      if (button && isVisible(button)) {
+        return button;
       }
     }
 
-    return false;
+    return null;
+  }
+
+  function findMenuItem(words) {
+    const candidates = visibleElements([
+      '[role="menuitem"]',
+      '[role="option"]',
+      "button",
+      '[role="button"]'
+    ]);
+
+    for (const candidate of candidates) {
+      const text = elementText(candidate);
+
+      if (
+        words.some(word =>
+          text.includes(normalize(word))
+        )
+      ) {
+        return candidate;
+      }
+    }
+
+    return null;
   }
 
   async function removeRepost() {
-
     /*
-     * First look for the direct repost control.
+     * First open Share.
      */
-    let button =
-      findRepostButton();
+    const share = findShareButton();
 
-    if (!button) {
-
-      const opened =
-        await openShareMenu();
-
-      if (!opened) {
-
-        return {
-          ok: false,
-          reason: "Share/Repost control not found"
-        };
-      }
-
-      button =
-        findRepostButton();
-    }
-
-    if (!button) {
-
-      /*
-       * Look for "Remove repost" in the menu.
-       */
-      const menuItems = [
-        ...document.querySelectorAll(
-          '[role="menuitem"], button, [role="button"]'
-        )
-      ].filter(visible);
-
-      for (const item of menuItems) {
-
-        const text =
-          textOf(item);
-
-        if (
-          text.includes("remove repost") ||
-          text.includes("undo repost") ||
-          text === "repost"
-        ) {
-
-          item.click();
-
-          await sleep(ACTION_DELAY);
-
-          return {
-            ok: true
-          };
-        }
-      }
-
+    if (!share) {
       return {
         ok: false,
-        reason: "Remove Repost option not found"
+        skipped: true,
+        reason: "Share button not found"
       };
     }
 
-    /*
-     * Open the share menu if needed.
-     */
-    button.click();
-
-    await sleep(500);
-
-    const items = [
-      ...document.querySelectorAll(
-        '[role="menuitem"], button, [role="button"]'
-      )
-    ].filter(visible);
-
-    for (const item of items) {
-
-      const text =
-        textOf(item);
-
-      if (
-        text.includes("remove repost") ||
-        text.includes("undo repost")
-      ) {
-
-        item.click();
-
-        await sleep(ACTION_DELAY);
-
-        return {
-          ok: true
-        };
-      }
+    if (!safeClick(share)) {
+      return {
+        ok: false,
+        reason: "Could not open Share menu"
+      };
     }
 
+    await sleep(600);
+
+    /*
+     * Look specifically for Remove Repost.
+     *
+     * Do NOT click a generic "Repost" item because that
+     * could create a repost instead of removing one.
+     */
+    const remove = findMenuItem([
+      "remove repost",
+      "undo repost"
+    ]);
+
+    if (!remove) {
+      return {
+        ok: false,
+        skipped: true,
+        reason:
+          "Remove Repost was not found"
+      };
+    }
+
+    if (!safeClick(remove)) {
+      return {
+        ok: false,
+        reason:
+          "Could not click Remove Repost"
+      };
+    }
+
+    await sleep(CONFIG.ACTION_DELAY);
+
     return {
-      ok: false,
-      reason: "Remove Repost option not found"
+      ok: true
     };
   }
 
-  /*
-   * --------------------------------------------------
-   * FAVORITES
-   * --------------------------------------------------
-   */
+  // ============================================================
+  // FAVORITES
+  // ============================================================
 
   function findFavoriteButton() {
+    const candidates = visibleElements([
+      '[data-e2e*="collect"]',
+      '[data-e2e*="favorite"]',
+      '[data-e2e*="favourite"]',
+      '[data-testid*="favorite"]',
+      '[data-testid*="collect"]'
+    ]);
 
-    const elements =
-      findElements([
-        '[data-e2e*="collect"]',
-        '[data-e2e*="favorite"]',
-        '[data-e2e*="favourite"]'
-      ]);
+    for (const candidate of candidates) {
+      const button = clickable(candidate);
 
-    for (const element of elements) {
-
-      const button =
-        element.closest("button") ||
-        element.closest('[role="button"]') ||
-        element;
-
-      if (visible(button)) {
+      if (button && isVisible(button)) {
         return button;
       }
     }
@@ -484,25 +428,19 @@
     /*
      * Accessibility fallback.
      */
-    const buttons = [
-      ...document.querySelectorAll(
-        'button, [role="button"]'
-      )
-    ].filter(visible);
+    const buttons = visibleElements([
+      "button",
+      '[role="button"]'
+    ]);
 
     for (const button of buttons) {
+      const label = normalize(
+        button.getAttribute("aria-label")
+      );
 
-      const label = (
-        button.getAttribute(
-          "aria-label"
-        ) || ""
-      ).toLowerCase();
-
-      const title = (
-        button.getAttribute(
-          "title"
-        ) || ""
-      ).toLowerCase();
+      const title = normalize(
+        button.getAttribute("title")
+      );
 
       const combined =
         `${label} ${title}`;
@@ -512,7 +450,6 @@
         combined.includes("favourite") ||
         combined.includes("save")
       ) {
-
         return button;
       }
     }
@@ -521,131 +458,93 @@
   }
 
   async function removeFavorite() {
-
-    let button =
-      findFavoriteButton();
+    let button = findFavoriteButton();
 
     /*
-     * If there is no direct save button, try Share.
+     * Some TikTok layouts expose Save/Favorite directly.
      */
-    if (!button) {
-
-      const opened =
-        await openShareMenu();
-
-      if (opened) {
-        button =
-          findFavoriteButton();
+    if (button) {
+      if (!safeClick(button)) {
+        return {
+          ok: false,
+          reason: "Could not click Favorite"
+        };
       }
-    }
 
-    if (!button) {
-
-      /*
-       * Search menu text.
-       */
-      const items = [
-        ...document.querySelectorAll(
-          '[role="menuitem"], button, [role="button"]'
-        )
-      ].filter(visible);
-
-      for (const item of items) {
-
-        const text =
-          textOf(item);
-
-        if (
-          text.includes(
-            "remove from favorites"
-          ) ||
-          text.includes(
-            "remove from favourite"
-          ) ||
-          text.includes(
-            "unsave"
-          )
-        ) {
-
-          item.click();
-
-          await sleep(ACTION_DELAY);
-
-          return {
-            ok: true
-          };
-        }
-      }
+      await sleep(CONFIG.ACTION_DELAY);
 
       return {
-        ok: false,
-        reason: "Favorite control not found"
+        ok: true
       };
     }
 
-    button.click();
+    /*
+     * Other layouts put it inside Share.
+     */
+    const share = findShareButton();
 
-    await sleep(ACTION_DELAY);
+    if (!share) {
+      return {
+        ok: false,
+        skipped: true,
+        reason:
+          "Favorite/Save button not found"
+      };
+    }
+
+    safeClick(share);
+
+    await sleep(600);
+
+    const remove = findMenuItem([
+      "remove from favorites",
+      "remove from favourite",
+      "unsave"
+    ]);
+
+    if (!remove) {
+      return {
+        ok: false,
+        skipped: true,
+        reason:
+          "Remove from Favorites was not found"
+      };
+    }
+
+    safeClick(remove);
+
+    await sleep(CONFIG.ACTION_DELAY);
 
     return {
       ok: true
     };
   }
 
-  /*
-   * --------------------------------------------------
-   * NEXT VIDEO
-   * --------------------------------------------------
-   */
+  // ============================================================
+  // NEXT VIDEO
+  // ============================================================
 
   function findNextButton() {
-
-    const selectors = [
+    const candidates = visibleElements([
       '[data-e2e="arrow-right"]',
+      '[data-e2e*="arrow-right"]',
+      '[data-testid*="arrow-right"]',
       'button[aria-label="Next"]',
-      'button[aria-label="next"]',
-      '[data-e2e*="arrow-right"]'
-    ];
+      'button[aria-label="Next video"]',
+      'button[aria-label="next"]'
+    ]);
 
-    for (const selector of selectors) {
-
-      const element =
-        document.querySelector(selector);
+    for (const candidate of candidates) {
+      const button = clickable(candidate);
 
       if (
-        element &&
-        visible(element) &&
-        element.getAttribute(
+        button &&
+        isVisible(button) &&
+        button.disabled !== true &&
+        button.getAttribute(
           "aria-disabled"
         ) !== "true"
       ) {
-
-        return element;
-      }
-    }
-
-    /*
-     * Text fallback.
-     */
-    const buttons = [
-      ...document.querySelectorAll(
-        'button, [role="button"]'
-      )
-    ].filter(visible);
-
-    for (const button of buttons) {
-
-      const label = (
-        button.getAttribute(
-          "aria-label"
-        ) || ""
-      ).toLowerCase();
-
-      if (
-        label === "next" ||
-        label.includes("next video")
-      ) {
-
         return button;
       }
     }
@@ -654,223 +553,134 @@
   }
 
   async function nextVideo() {
-
-    const button =
-      findNextButton();
+    const button = findNextButton();
 
     if (!button) {
       return false;
     }
 
-    button.click();
+    if (!safeClick(button)) {
+      return false;
+    }
 
-    await sleep(NEXT_DELAY);
+    await sleep(CONFIG.NEXT_DELAY);
 
     return true;
   }
 
-  /*
-   * --------------------------------------------------
-   * PROFILE GRID
-   * --------------------------------------------------
-   */
-
-  function findVideoTiles(type) {
-
-    let selectors = [];
-
-    if (type === "likes") {
-
-      selectors = [
-        '[data-e2e="user-liked-item"]',
-        '[data-e2e*="liked-item"]'
-      ];
-
-    } else if (type === "reposts") {
-
-      selectors = [
-        '[data-e2e="user-post-item"]',
-        '[data-e2e*="repost"]'
-      ];
-
-    } else if (type === "favorites") {
-
-      selectors = [
-        '[data-e2e*="favorite"]',
-        '[data-e2e*="collect"]'
-      ];
-    }
-
-    for (const selector of selectors) {
-
-      const elements = [
-        ...document.querySelectorAll(selector)
-      ].filter(visible);
-
-      if (elements.length) {
-        return elements;
-      }
-    }
-
-    /*
-     * Generic video links fallback.
-     */
-    return [
-      ...document.querySelectorAll(
-        'a[href*="/video/"]'
-      )
-    ].filter(visible);
-  }
-
-  async function openFirstTile(type) {
-
-    const tiles =
-      findVideoTiles(type);
-
-    if (!tiles.length) {
-      return false;
-    }
-
-    const tile =
-      tiles[0];
-
-    const link =
-      tile.matches("a")
-        ? tile
-        : tile.querySelector(
-            'a[href*="/video/"]'
-          );
-
-    if (!link) {
-      return false;
-    }
-
-    link.click();
-
-    await sleep(2000);
-
-    return Boolean(
-      findLikeButton() ||
-      findRepostButton() ||
-      findFavoriteButton()
-    );
-  }
-
-  /*
-   * --------------------------------------------------
-   * MAIN CLEANUP
-   * --------------------------------------------------
-   */
+  // ============================================================
+  // OPERATION DISPATCH
+  // ============================================================
 
   async function processCurrent(type) {
+    switch (type) {
+      case "likes":
+        return removeLike();
 
-    if (type === "likes") {
-      return removeLike();
+      case "reposts":
+        return removeRepost();
+
+      case "favorites":
+        return removeFavorite();
+
+      default:
+        return {
+          ok: false,
+          reason: `Unknown operation: ${type}`
+        };
     }
-
-    if (type === "reposts") {
-      return removeRepost();
-    }
-
-    if (type === "favorites") {
-      return removeFavorite();
-    }
-
-    return {
-      ok: false,
-      reason: "Unknown operation"
-    };
   }
 
-  async function run(type) {
+  // ============================================================
+  // MAIN LOOP
+  // ============================================================
 
-    if (running) {
-      return;
-    }
+  async function run(type) {
+    if (running) return;
 
     running = true;
     stopRequested = false;
 
     let done = 0;
     let attempts = 0;
+    let failures = 0;
 
     try {
-
-      send({
-        type: "STATUS",
-        text: "Preparing..."
-      });
+      report(
+        "Starting...",
+        `Operation: ${type}`
+      );
 
       /*
-       * The user can either:
+       * Require the user to already be inside a TikTok
+       * collection/player. This is intentional.
        *
-       * A) already have a video open
-       * B) be on the appropriate profile tab
-       *
-       * Try to detect an existing video first.
+       * Automatically guessing which profile tab TikTok
+       * currently uses is less safe than asking the user
+       * to open the correct collection.
        */
+      if (!findLikeButton() &&
+          !findRepostButton() &&
+          !findFavoriteButton()) {
 
-      const videoAlreadyOpen =
-        Boolean(
-          findLikeButton() ||
-          findRepostButton() ||
-          findFavoriteButton()
+        throw new Error(
+          "Open a video from the correct TikTok collection first."
         );
-
-      if (!videoAlreadyOpen) {
-
-        send({
-          type: "STATUS",
-          text: "Finding videos..."
-        });
-
-        const opened =
-          await openFirstTile(type);
-
-        if (!opened) {
-
-          throw new Error(
-            "No videos found. Open the corresponding TikTok tab first."
-          );
-        }
       }
 
       while (!stopRequested) {
-
         attempts++;
 
-        send({
-          type: "STATUS",
-          text:
-            `${type}: processing video ${attempts}`,
-          detail:
-            "Checking the current action before clicking."
-        });
+        report(
+          `Processing ${attempts}...`,
+          "Checking the current control before acting."
+        );
 
         const result =
           await processCurrent(type);
 
         if (result.ok) {
-
           done++;
+          failures = 0;
 
-          send({
-            type: "PROGRESS",
+          progress(
             done,
-            total: attempts,
-            detail:
-              "Action completed successfully."
-          });
+            attempts,
+            "Successfully completed."
+          );
+
+        } else if (result.skipped) {
+          failures++;
+
+          progress(
+            done,
+            attempts,
+            `Skipped: ${result.reason}`
+          );
 
         } else {
+          failures++;
 
-          send({
-            type: "STATUS",
-            text:
-              result.reason,
-            detail:
-              "Skipped — no destructive click was made."
-          });
+          progress(
+            done,
+            attempts,
+            `Failed: ${result.reason}`
+          );
+        }
+
+        /*
+         * Safety stop.
+         *
+         * If TikTok's UI doesn't match our expectations
+         * repeatedly, do not keep clicking.
+         */
+        if (
+          failures >=
+          CONFIG.MAX_CONSECUTIVE_FAILURES
+        ) {
+          throw new Error(
+            "Stopped safely: TikTok's controls could not be reliably identified."
+          );
         }
 
         if (stopRequested) {
@@ -881,30 +691,18 @@
           await nextVideo();
 
         if (!moved) {
-
-          send({
-            type: "STATUS",
-            text:
-              "No next-video control found.",
-            detail:
-              "TikTok may have changed its player layout."
-          });
-
           break;
         }
 
-        await sleep(PAGE_DELAY);
+        await sleep(CONFIG.PAGE_DELAY);
       }
 
       if (stopRequested) {
-
         send({
           type: "STOPPED",
           done
         });
-
       } else {
-
         send({
           type: "FINISHED",
           done
@@ -912,9 +710,8 @@
       }
 
     } catch (error) {
-
       console.error(
-        "TikTok Cleaner error:",
+        "TikTok Cleaner:",
         error
       );
 
@@ -922,21 +719,18 @@
         type: "ERROR",
         text:
           error?.message ||
-          "Cleanup failed."
+          "Cleanup stopped."
       });
 
     } finally {
-
       running = false;
       stopRequested = false;
     }
   }
 
-  /*
-   * --------------------------------------------------
-   * MESSAGE HANDLER
-   * --------------------------------------------------
-   */
+  // ============================================================
+  // MESSAGE HANDLER
+  // ============================================================
 
   chrome.runtime.onMessage.addListener(
     (message, sender, sendResponse) => {
@@ -946,7 +740,6 @@
       }
 
       if (message.command === "START") {
-
         run(message.type);
 
         sendResponse({
@@ -957,7 +750,6 @@
       }
 
       if (message.command === "STOP") {
-
         stopRequested = true;
 
         sendResponse({
