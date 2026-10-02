@@ -1,38 +1,23 @@
-let activeTabId = null;
+const startButton = document.getElementById("start");
+const stopButton = document.getElementById("stop");
+const statusElement = document.getElementById("status");
+const counterElement = document.getElementById("counter");
+const barElement = document.getElementById("bar");
+
 let running = false;
 
-const unlikeBtn = document.getElementById("unlikeBtn");
-const repostBtn = document.getElementById("repostBtn");
-const favoriteBtn = document.getElementById("favoriteBtn");
-const stopBtn = document.getElementById("stopBtn");
-
-const statusText = document.getElementById("status");
-const counterText = document.getElementById("counter");
-const progressBar = document.getElementById("progress");
-
-function setStatus(text) {
-  statusText.textContent = text;
+function status(text) {
+  statusElement.textContent = text;
 }
 
-function setProgress(done, total) {
-  counterText.textContent = `${done} / ${total}`;
+function setRunning(value) {
+  running = value;
 
-  const percentage =
-    total > 0
-      ? Math.min(100, (done / total) * 100)
-      : 0;
-
-  progressBar.style.width = `${percentage}%`;
+  startButton.disabled = value;
+  stopButton.disabled = !value;
 }
 
-function setButtonsDisabled(disabled) {
-  unlikeBtn.disabled = disabled;
-  repostBtn.disabled = disabled;
-  favoriteBtn.disabled = disabled;
-  stopBtn.disabled = !disabled;
-}
-
-async function getTikTokTab() {
+async function getTab() {
   const tabs = await chrome.tabs.query({
     active: true,
     currentWindow: true
@@ -40,155 +25,115 @@ async function getTikTokTab() {
 
   const tab = tabs[0];
 
-  if (!tab || !tab.url || !tab.url.startsWith("https://www.tiktok.com/")) {
+  if (!tab?.url?.startsWith("https://www.tiktok.com/")) {
     throw new Error(
-      "Open TikTok in the active browser tab first."
+      "Open TikTok in the current tab first."
     );
   }
 
   return tab;
 }
 
-async function start(type) {
+startButton.addEventListener("click", async () => {
   if (running) return;
 
-  let tab;
-
   try {
-    tab = await getTikTokTab();
+    const tab = await getTab();
+
+    const confirmed = confirm(
+      "This will remove your likes from videos using TikTok's Like button.\n\n" +
+      "Start?"
+    );
+
+    if (!confirmed) return;
+
+    setRunning(true);
+
+    status("Starting...");
+    counterElement.textContent = "0 processed";
+    barElement.style.width = "0%";
+
+    chrome.tabs.sendMessage(
+      tab.id,
+      {
+        command: "START_UNLIKE"
+      },
+      response => {
+        if (chrome.runtime.lastError) {
+          status(
+            "Refresh TikTok, open Likes, then try again."
+          );
+
+          setRunning(false);
+        }
+      }
+    );
+
   } catch (error) {
-    setStatus(error.message);
-    return;
+    status(error.message);
   }
+});
 
-  const confirmed = confirm(
-    `Start "${type}" cleanup?\n\n` +
-    `This will perform actions on your TikTok account ` +
-    `using the currently logged-in page.`
-  );
+stopButton.addEventListener("click", async () => {
+  try {
+    const tab = await getTab();
 
-  if (!confirmed) {
-    return;
-  }
-
-  running = true;
-  activeTabId = tab.id;
-
-  setButtonsDisabled(true);
-
-  setStatus("Starting...");
-  setProgress(0, 0);
-
-  chrome.tabs.sendMessage(
-    activeTabId,
-    {
-      command: "START",
-      type
-    },
-    response => {
-      if (chrome.runtime.lastError) {
-        setStatus(
-          "Refresh TikTok and try again."
-        );
-        resetUI();
-        return;
+    chrome.tabs.sendMessage(
+      tab.id,
+      {
+        command: "STOP"
       }
+    );
 
-      if (!response) {
-        setStatus("No response from TikTok.");
-        resetUI();
-      }
-    }
-  );
-}
+    status("Stopping...");
+  } catch {
+    status("Unable to stop.");
+  }
+});
 
-function stop() {
-  if (!running || !activeTabId) {
-    return;
+chrome.runtime.onMessage.addListener(message => {
+  if (!message) return;
+
+  if (message.type === "STATUS") {
+    status(message.text);
   }
 
-  chrome.tabs.sendMessage(
-    activeTabId,
-    {
-      command: "STOP"
-    }
-  );
+  if (message.type === "PROGRESS") {
+    counterElement.textContent =
+      `${message.done} processed`;
 
-  setStatus("Stopping...");
-}
-
-function resetUI() {
-  running = false;
-  activeTabId = null;
-
-  setButtonsDisabled(false);
-}
-
-unlikeBtn.addEventListener(
-  "click",
-  () => start("unlike")
-);
-
-repostBtn.addEventListener(
-  "click",
-  () => start("repost")
-);
-
-favoriteBtn.addEventListener(
-  "click",
-  () => start("favorite")
-);
-
-stopBtn.addEventListener(
-  "click",
-  stop
-);
-
-chrome.runtime.onMessage.addListener(
-  message => {
-
-    if (!message) return;
-
-    if (message.type === "PROGRESS") {
-      setStatus(message.status || "Processing...");
-      setProgress(
-        message.done || 0,
-        message.total || 0
-      );
-    }
-
-    if (message.type === "FINISHED") {
-      setStatus(
-        `Finished: ${message.done} processed`
-      );
-
-      setProgress(
-        message.done,
-        message.total
-      );
-
-      resetUI();
-    }
-
-    if (message.type === "STOPPED") {
-      setStatus(
-        `Stopped: ${message.done} processed`
-      );
-
-      setProgress(
-        message.done,
-        message.total
-      );
-
-      resetUI();
-    }
-
-    if (message.type === "ERROR") {
-      setStatus(
-        message.message || "Something went wrong."
-      );
-
-      resetUI();
+    if (message.total > 0) {
+      barElement.style.width =
+        `${Math.min(
+          100,
+          (message.done / message.total) * 100
+        )}%`;
     }
   }
-);
+
+  if (message.type === "FINISHED") {
+    status(
+      `Finished — ${message.done} videos unliked`
+    );
+
+    counterElement.textContent =
+      `${message.done} processed`;
+
+    barElement.style.width = "100%";
+
+    setRunning(false);
+  }
+
+  if (message.type === "STOPPED") {
+    status(
+      `Stopped — ${message.done} videos processed`
+    );
+
+    setRunning(false);
+  }
+
+  if (message.type === "ERROR") {
+    status(`Error: ${message.text}`);
+    setRunning(false);
+  }
+});
