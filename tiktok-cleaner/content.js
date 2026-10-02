@@ -1,23 +1,20 @@
 (() => {
   "use strict";
 
-  let stopRequested = false;
   let running = false;
+  let stopRequested = false;
 
-  const WAIT_AFTER_ACTION = 1200;
-  const WAIT_BETWEEN_ITEMS = 1800;
+  /*
+   * TikTok can rate-limit rapid interactions.
+   * Keep this deliberately slow.
+   */
+  const ACTION_DELAY = 1800;
+  const NEXT_DELAY = 1500;
 
   function sleep(ms) {
     return new Promise(resolve => {
       setTimeout(resolve, ms);
     });
-  }
-
-  function normalize(text) {
-    return (text || "")
-      .toLowerCase()
-      .replace(/\s+/g, " ")
-      .trim();
   }
 
   function send(message) {
@@ -27,57 +24,214 @@
   function visible(element) {
     if (!element) return false;
 
-    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
 
     return (
+      rect.width > 0 &&
+      rect.height > 0 &&
       style.display !== "none" &&
-      style.visibility !== "hidden" &&
-      element.getBoundingClientRect().width > 0 &&
-      element.getBoundingClientRect().height > 0
+      style.visibility !== "hidden"
     );
   }
 
-  function allButtons() {
-    return [
-      ...document.querySelectorAll(
-        'button, [role="button"], [data-e2e]'
-      )
-    ].filter(visible);
+  /*
+   * TikTok has used these selectors for the web Like
+   * control. Keep several fallbacks because the DOM
+   * changes between layouts.
+   */
+  function findLikeControl() {
+
+    const selectors = [
+      '[data-e2e="browse-like-icon"]',
+      '[data-e2e="like-icon"]',
+      'span[data-e2e="browse-like-icon"]',
+      'span[data-e2e="like-icon"]'
+    ];
+
+    for (const selector of selectors) {
+
+      const elements = [
+        ...document.querySelectorAll(selector)
+      ];
+
+      for (const element of elements) {
+
+        if (!visible(element)) {
+          continue;
+        }
+
+        /*
+         * The data-e2e element is sometimes a span
+         * inside the actual clickable button.
+         */
+        const button =
+          element.closest("button") ||
+          element.closest('[role="button"]') ||
+          element;
+
+        if (visible(button)) {
+          return button;
+        }
+      }
+    }
+
+    return null;
   }
 
-  function findButton(keywords) {
-    const buttons = allButtons();
+  /*
+   * Determine whether the current Like button is
+   * actually active.
+   *
+   * We NEVER click it unless we believe the video
+   * is already liked. This prevents accidentally
+   * adding likes.
+   */
+  function isLiked(button) {
 
-    for (const button of buttons) {
+    if (!button) {
+      return false;
+    }
 
-      const text = normalize(
-        button.innerText ||
-        button.textContent ||
-        ""
+    /*
+     * aria-pressed is the cleanest signal when available.
+     */
+    const pressed =
+      button.getAttribute("aria-pressed");
+
+    if (pressed === "true") {
+      return true;
+    }
+
+    /*
+     * Look for TikTok's red heart SVG.
+     *
+     * TikTok's red brand color is approximately:
+     * rgb(254, 44, 85)
+     */
+    const redHeart =
+      button.querySelector(
+        'svg [fill="rgb(254, 44, 85)"],' +
+        'svg [fill="rgba(254, 44, 85, 1.0)"],' +
+        'svg path[fill*="254,44,85"],' +
+        'svg path[fill*="254, 44, 85"]'
       );
 
-      const aria = normalize(
-        button.getAttribute("aria-label") ||
-        ""
-      );
+    if (redHeart) {
+      return true;
+    }
 
-      const title = normalize(
-        button.getAttribute("title") ||
-        ""
-      );
+    /*
+     * Some versions put the fill on the SVG itself.
+     */
+    const svgs = button.querySelectorAll("svg");
 
-      const e2e = normalize(
-        button.getAttribute("data-e2e") ||
-        ""
-      );
+    for (const svg of svgs) {
 
-      const combined =
-        `${text} ${aria} ${title} ${e2e}`;
+      const fill =
+        (svg.getAttribute("fill") || "")
+          .replace(/\s/g, "")
+          .toLowerCase();
 
       if (
-        keywords.some(keyword =>
-          combined.includes(keyword)
-        )
+        fill.includes("254,44,85") ||
+        fill.includes("fe2c55")
+      ) {
+        return true;
+      }
+    }
+
+    /*
+     * Accessibility fallback.
+     */
+    const label = (
+      button.getAttribute("aria-label") || ""
+    ).toLowerCase();
+
+    if (
+      label.includes("liked") &&
+      !label.includes("like this")
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  async function unlikeCurrentVideo() {
+
+    const likeButton = findLikeControl();
+
+    if (!likeButton) {
+      return {
+        success: false,
+        reason: "Like button not found"
+      };
+    }
+
+    /*
+     * SAFETY CHECK:
+     *
+     * Never click an inactive heart.
+     */
+    if (!isLiked(likeButton)) {
+      return {
+        success: false,
+        reason: "Video does not appear to be liked"
+      };
+    }
+
+    likeButton.scrollIntoView({
+      behavior: "instant",
+      block: "center"
+    });
+
+    await sleep(300);
+
+    likeButton.click();
+
+    /*
+     * Wait for TikTok to process the action.
+     */
+    await sleep(ACTION_DELAY);
+
+    /*
+     * Verify the heart changed state.
+     */
+    const after =
+      findLikeControl();
+
+    if (after && !isLiked(after)) {
+      return {
+        success: true
+      };
+    }
+
+    return {
+      success: false,
+      reason: "TikTok did not confirm the unlike"
+    };
+  }
+
+  function findNextButton() {
+
+    const selectors = [
+      'button[data-e2e="arrow-right"]',
+      '[data-e2e="arrow-right"]',
+      'button[aria-label*="Next"]',
+      'button[aria-label*="next"]'
+    ];
+
+    for (const selector of selectors) {
+
+      const button =
+        document.querySelector(selector);
+
+      if (
+        button &&
+        visible(button) &&
+        !button.disabled &&
+        button.getAttribute("aria-disabled") !== "true"
       ) {
         return button;
       }
@@ -86,123 +240,90 @@
     return null;
   }
 
-  function click(element) {
-    if (!element) return false;
+  async function moveNext() {
 
-    element.scrollIntoView({
-      behavior: "instant",
-      block: "center"
-    });
+    const next = findNextButton();
 
-    element.click();
+    if (!next) {
+      return false;
+    }
+
+    next.click();
+
+    await sleep(NEXT_DELAY);
 
     return true;
   }
 
-  async function clickMenuItem(keywords) {
-    await sleep(500);
+  /*
+   * When the Likes page opens a video in a viewer,
+   * this function attempts to identify that viewer.
+   */
+  function isVideoViewerOpen() {
 
-    const elements = [
-      ...document.querySelectorAll(
-        '[role="menuitem"], button, [role="button"], div'
+    return Boolean(
+      document.querySelector(
+        '[data-e2e="browse-like-icon"],' +
+        '[data-e2e="like-icon"]'
       )
-    ].filter(visible);
+    );
+  }
 
-    for (const element of elements) {
-      const text = normalize(
-        element.innerText ||
-        element.textContent ||
-        ""
-      );
+  /*
+   * Find a video from the user's liked-video grid.
+   *
+   * Older/current TikTok layouts have used
+   * data-e2e="user-liked-item".
+   */
+  function findLikedGridItem() {
 
-      if (
-        text.length < 100 &&
-        keywords.some(keyword =>
-          text.includes(keyword)
-        )
-      ) {
-        click(element);
-        return true;
+    const selectors = [
+      '[data-e2e="user-liked-item"]',
+      '[data-e2e="user-liked-item-list"] a',
+      '[data-e2e="user-liked-item"] a'
+    ];
+
+    for (const selector of selectors) {
+
+      const item =
+        document.querySelector(selector);
+
+      if (item && visible(item)) {
+        return item;
       }
     }
 
-    return false;
+    return null;
   }
 
-  function getActionKeywords(type) {
-    if (type === "unlike") {
-      return [
-        "unlike",
-        "liked"
-      ];
-    }
+  async function openFirstLikedVideo() {
 
-    if (type === "repost") {
-      return [
-        "remove repost",
-        "repost"
-      ];
-    }
+    const item =
+      findLikedGridItem();
 
-    if (type === "favorite") {
-      return [
-        "remove from favorites",
-        "remove from favorite",
-        "unfavorite",
-        "favorite"
-      ];
-    }
-
-    return [];
-  }
-
-  async function processCurrentItem(type) {
-
-    if (stopRequested) {
+    if (!item) {
       return false;
     }
 
-    const keywords = getActionKeywords(type);
+    const link =
+      item.matches("a")
+        ? item
+        : item.querySelector("a");
 
-    /*
-     * Find the relevant action button.
-     *
-     * TikTok changes its selectors frequently, so we
-     * intentionally look at accessible labels and text
-     * rather than relying on one class name.
-     */
-
-    let button = findButton(keywords);
-
-    if (button) {
-      click(button);
-
-      await sleep(WAIT_AFTER_ACTION);
-
-      return true;
+    if (!link) {
+      return false;
     }
 
+    link.click();
+
     /*
-     * Some TikTok actions are inside a "Share" or
-     * "More" menu.
+     * Wait for viewer/player.
      */
-
-    const moreButton = findButton([
-      "more",
-      "more options",
-      "share"
-    ]);
-
-    if (moreButton) {
-      click(moreButton);
+    for (let i = 0; i < 20; i++) {
 
       await sleep(500);
 
-      const menuClicked =
-        await clickMenuItem(keywords);
-
-      if (menuClicked) {
-        await sleep(WAIT_AFTER_ACTION);
+      if (isVideoViewerOpen()) {
         return true;
       }
     }
@@ -210,39 +331,7 @@
     return false;
   }
 
-  function collectCandidateItems() {
-
-    /*
-     * Candidate containers are deliberately broad.
-     * TikTok's DOM changes between desktop layouts,
-     * account pages and video pages.
-     */
-
-    const candidates = [
-      ...document.querySelectorAll(
-        '[data-e2e*="video"], ' +
-        '[data-e2e*="item"], ' +
-        'article'
-      )
-    ];
-
-    return [
-      ...new Set(
-        candidates.filter(visible)
-      )
-    ];
-  }
-
-  async function scrollPage() {
-    window.scrollBy({
-      top: window.innerHeight * 0.85,
-      behavior: "smooth"
-    });
-
-    await sleep(1200);
-  }
-
-  async function runCleanup(type) {
+  async function run() {
 
     if (running) {
       return;
@@ -252,100 +341,89 @@
     stopRequested = false;
 
     let done = 0;
-    let total = 0;
-
-    send({
-      type: "PROGRESS",
-      status: "Scanning...",
-      done,
-      total
-    });
+    let attempts = 0;
 
     try {
 
+      send({
+        type: "STATUS",
+        text: "Checking TikTok page..."
+      });
+
       /*
-       * This first implementation processes visible
-       * candidates and keeps scrolling until no new
-       * candidates appear.
+       * If the viewer isn't already open, try to open
+       * the first liked video.
        */
+      if (!isVideoViewerOpen()) {
 
-      const processed = new WeakSet();
+        send({
+          type: "STATUS",
+          text: "Opening a liked video..."
+        });
 
-      let unchangedRounds = 0;
+        const opened =
+          await openFirstLikedVideo();
+
+        if (!opened) {
+          throw new Error(
+            "Couldn't open a liked video. " +
+            "Open Profile → Liked videos and try again."
+          );
+        }
+      }
 
       while (!stopRequested) {
 
-        const items = collectCandidateItems();
+        attempts++;
 
-        let newItemFound = false;
+        send({
+          type: "STATUS",
+          text: `Checking video ${attempts}...`
+        });
 
-        for (const item of items) {
+        const result =
+          await unlikeCurrentVideo();
 
-          if (stopRequested) {
-            break;
-          }
+        if (result.success) {
 
-          if (processed.has(item)) {
-            continue;
-          }
-
-          processed.add(item);
-          newItemFound = true;
-
-          total++;
+          done++;
 
           send({
             type: "PROGRESS",
-            status: `Processing ${type}...`,
             done,
-            total
+            total: attempts
+          });
+
+        } else {
+
+          send({
+            type: "STATUS",
+            text: result.reason
           });
 
           /*
-           * Move the item into view.
+           * Don't count a video as successfully
+           * unliked unless verification succeeded.
            */
-          item.scrollIntoView({
-            behavior: "instant",
-            block: "center"
-          });
+        }
 
-          await sleep(400);
+        if (stopRequested) {
+          break;
+        }
 
-          const success =
-            await processCurrentItem(type);
+        /*
+         * Move to the next liked video.
+         */
+        const moved =
+          await moveNext();
 
-          if (success) {
-            done++;
-          }
+        if (!moved) {
 
           send({
-            type: "PROGRESS",
-            status: success
-              ? "Processed"
-              : "No matching action found",
-            done,
-            total
+            type: "STATUS",
+            text: "No next video button found."
           });
 
-          await sleep(WAIT_BETWEEN_ITEMS);
-        }
-
-        if (!newItemFound) {
-          unchangedRounds++;
-        } else {
-          unchangedRounds = 0;
-        }
-
-        /*
-         * Give TikTok time to load more content.
-         */
-        await scrollPage();
-
-        /*
-         * Don't run forever if the page stopped
-         * producing new items.
-         */
-        if (unchangedRounds >= 5) {
           break;
         }
       }
@@ -354,16 +432,14 @@
 
         send({
           type: "STOPPED",
-          done,
-          total
+          done
         });
 
       } else {
 
         send({
           type: "FINISHED",
-          done,
-          total
+          done
         });
       }
 
@@ -376,10 +452,13 @@
 
       send({
         type: "ERROR",
-        message: error.message || "Cleanup failed."
+        text:
+          error?.message ||
+          "Unexpected error."
       });
 
     } finally {
+
       running = false;
       stopRequested = false;
     }
@@ -392,14 +471,12 @@
         return;
       }
 
-      if (message.command === "START") {
+      if (message.command === "START_UNLIKE") {
 
-        if (!running) {
-          runCleanup(message.type);
-        }
+        run();
 
         sendResponse({
-          started: true
+          ok: true
         });
 
         return true;
@@ -410,7 +487,7 @@
         stopRequested = true;
 
         sendResponse({
-          stopped: true
+          ok: true
         });
 
         return true;
