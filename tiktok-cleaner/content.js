@@ -5,12 +5,12 @@
   // CONFIGURATION
   // ============================================================
 
-  const CONFIG = Object.freeze({
+  const CONFIG = {
     ACTION_DELAY: 1800,
     NEXT_DELAY: 1800,
     PAGE_DELAY: 1200,
     MAX_CONSECUTIVE_FAILURES: 3
-  });
+  };
 
   let running = false;
   let stopRequested = false;
@@ -739,7 +739,17 @@
         return;
       }
 
+      if (message.command === "CHECK") {
+        const checkers = { likes: findLikeButton, reposts: findShareButton, favorites: findFavoriteButton };
+        const found = checkers[message.type]?.();
+        sendResponse(found
+          ? { ok: true, text: "TikTok page is reachable", detail: `Found a relevant control for ${message.type}. Open a video from the target collection; only the current player and next-video navigation are processed.` }
+          : { ok: false, error: `Could not find a relevant control for ${message.type} on this page. Open a video in the target collection, then try again.` });
+        return true;
+      }
+
       if (message.command === "START") {
+        if (Number.isFinite(message.actionDelay)) CONFIG.ACTION_DELAY = Math.max(1200, Math.min(6000, message.actionDelay));
         run(message.type);
 
         sendResponse({
