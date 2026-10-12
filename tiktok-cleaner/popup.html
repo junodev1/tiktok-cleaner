@@ -1,63 +1,50 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>TikTok Cleaner</title>
   <link rel="stylesheet" href="popup.css">
 </head>
-
 <body>
+  <main class="app">
+    <header class="header">
+      <div class="brand-mark">TC</div>
+      <div><h1>TikTok Cleaner</h1><p>Clean up your activity</p></div>
+      <span class="live-dot" title="Extension ready"></span>
+    </header>
 
-<div class="container">
+    <section class="notice"><strong>Before you start</strong><p>Open TikTok and enter the collection you want to clean. This extension uses visible TikTok controls; it does not bypass login or access private APIs.</p></section>
 
-  <h1>TikTok Cleaner</h1>
+    <section class="section">
+      <div class="section-title">Choose what to clean</div>
+      <div class="choices" role="group" aria-label="Cleanup type">
+        <button class="choice selected" data-type="likes" aria-pressed="true"><span class="choice-icon">♥</span><span><b>Liked videos</b><small>Remove likes</small></span><span class="radio-dot"></span></button>
+        <button class="choice" data-type="reposts" aria-pressed="false"><span class="choice-icon">↻</span><span><b>Reposts</b><small>Undo reposts</small></span><span class="radio-dot"></span></button>
+        <button class="choice" data-type="favorites" aria-pressed="false"><span class="choice-icon">☆</span><span><b>Favorites</b><small>Remove saved items</small></span><span class="radio-dot"></span></button>
+      </div>
+    </section>
 
-  <p class="description">
-    Remove your TikTok likes, reposts and favorites.
-  </p>
+    <section class="section">
+      <div class="section-title">Cleanup controls</div>
+      <div class="control-row"><span>Action delay</span><select id="delay" aria-label="Action delay"><option value="1800">Normal · 1.8 sec</option><option value="2600">Careful · 2.6 sec</option><option value="4000">Slow · 4 sec</option></select></div>
+      <p class="hint">Slower actions may be more reliable when TikTok is loading.</p>
+    </section>
 
-  <div class="warning">
-    ⚠️ These actions change your TikTok account.
-    Only start an operation you actually want.
-  </div>
+    <section class="status-card" aria-live="polite">
+      <div class="status-line"><span id="statusDot" class="status-dot"></span><strong id="status">Ready to scan</strong></div>
+      <p id="details">Select a cleanup type, then check the active TikTok tab.</p>
+      <div class="progress-track"><div id="progress"></div></div>
+      <div class="metrics"><span><b id="count">0</b> removed</span><span id="percent">0%</span></div>
+    </section>
 
-  <button id="likes" class="action like">
-    ❤️ Remove All Likes
-  </button>
-
-  <button id="reposts" class="action repost">
-    🔄 Remove All Reposts
-  </button>
-
-  <button id="favorites" class="action favorite">
-    ⭐ Remove All Favorites
-  </button>
-
-  <button id="stop" class="stop" disabled>
-    ⛔ STOP
-  </button>
-
-  <div class="status">
-    <span id="status">Ready</span>
-  </div>
-
-  <div class="counter">
-    <span id="count">0</span>
-    processed
-  </div>
-
-  <div class="progress">
-    <div id="progress"></div>
-  </div>
-
-  <div id="details" class="details">
-    Waiting...
-  </div>
-
-</div>
-
-<script src="popup.js"></script>
-
+    <div class="actions">
+      <button id="check" class="secondary">Check page</button>
+      <button id="start" class="primary">Start cleanup</button>
+      <button id="stop" class="danger" disabled>Stop</button>
+    </div>
+    <p class="footer">Review the selected type carefully. TikTok can change its interface, so verify the results on TikTok afterward.</p>
+  </main>
+  <script src="popup.js"></script>
 </body>
 </html>
