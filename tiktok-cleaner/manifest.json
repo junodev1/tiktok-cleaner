@@ -4,7 +4,8 @@
   "version": "3.0.0",
   "description": "Remove your TikTok likes, reposts and favorites using the TikTok website.",
   "permissions": [
-    "tabs"
+    "tabs",
+    "storage"
   ],
   "host_permissions": [
     "https://www.tiktok.com/*"
